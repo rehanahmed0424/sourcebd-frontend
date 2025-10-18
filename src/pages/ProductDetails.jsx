@@ -1,0 +1,651 @@
+import React, { useState, useEffect } from 'react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import { useCart } from '../context/CartContext';
+import { useWishlist } from '../context/WishlistContext';
+import './ProductDetails.css';
+
+const ProductDetails = () => {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const { isAuthenticated, user } = useAuth();
+  const { addToCart, cartItems } = useCart();
+  const { addToWishlist, wishlistItems } = useWishlist();
+  
+  const [product, setProduct] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [activeTab, setActiveTab] = useState('description');
+  const [selectedImage, setSelectedImage] = useState(0);
+  const [quantity, setQuantity] = useState(1);
+  const [isInquiryModalOpen, setIsInquiryModalOpen] = useState(false);
+  const [inquiryData, setInquiryData] = useState({
+    name: '',
+    email: '',
+    company: '',
+    phone: '',
+    message: '',
+    quantity: 1
+  });
+
+  // Toast notification state
+  const [toast, setToast] = useState({
+    show: false,
+    message: '',
+    type: 'success',
+    action: ''
+  });
+
+  // Check if product is in wishlist
+  const isInWishlist = wishlistItems.some(item => item._id === product?._id);
+
+  // Check if product is in cart
+  const isInCart = cartItems.some(item => item.id === product?._id);
+
+  // Show toast notification
+  const showToast = (message, type = 'success', action = '') => {
+    setToast({
+      show: true,
+      message,
+      type,
+      action
+    });
+    
+    setTimeout(() => {
+      setToast(prev => ({ ...prev, show: false }));
+    }, 3000);
+  };
+
+  // Hide toast manually
+  const hideToast = () => {
+    setToast(prev => ({ ...prev, show: false }));
+  };
+
+  // Calculate current price based on quantity
+  const getCurrentPrice = () => {
+    if (!product?.tieredPricing || product.tieredPricing.length === 0) return null;
+    
+    const sortedTiers = [...product.tieredPricing].sort((a, b) => a.minQty - b.minQty);
+    const currentTier = sortedTiers.find(tier => 
+      quantity >= tier.minQty && (tier.maxQty === 0 || quantity <= tier.maxQty)
+    );
+    
+    return currentTier ? currentTier.price : null;
+  };
+
+  const currentPrice = getCurrentPrice();
+  const totalPrice = currentPrice ? (currentPrice * quantity).toFixed(2) : null;
+const API = import.meta.env.VITE_API_URL;
+
+  // Image URL helper function
+  const getImageUrl = (imagePath) => {
+    if (!imagePath) return '/images/product-placeholder.jpg';
+    if (imagePath.startsWith('http') || imagePath.startsWith('data:')) return imagePath;
+if (!imagePath.startsWith('/')) return `${API}/uploads/${imagePath}`;
+
+return `${API}${imagePath}`;
+
+  };
+
+  // Fetch product details from API
+  useEffect(() => {
+    const fetchProduct = async () => {
+      try {
+        setLoading(true);
+        console.log('Fetching product with ID:', id);
+        
+const response = await fetch(`${API}/api/products/${id}`);
+
+        
+        if (!response.ok) {
+          throw new Error(`Product not found: ${response.status}`);
+        }
+        
+        const productData = await response.json();
+        console.log('Product data received:', productData);
+        setProduct(productData);
+        
+        // Set default quantity to product's MOQ or first tier min quantity
+        const defaultQty = productData.moq || (productData.tieredPricing?.[0]?.minQty || 1);
+        setQuantity(defaultQty);
+        
+        // Pre-fill inquiry form with user data if available
+        if (isAuthenticated && user) {
+          setInquiryData(prev => ({
+            ...prev,
+            name: `${user.firstName} ${user.lastName}`,
+            email: user.email,
+            phone: user.phone
+          }));
+        }
+        
+      } catch (err) {
+        console.error('Error fetching product:', err);
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (id) {
+      fetchProduct();
+    }
+  }, [id, isAuthenticated, user]);
+
+  const handleInquirySubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!isAuthenticated) {
+      navigate('/login', { state: { from: `/product/${id}` } });
+      return;
+    }
+
+    try {
+ const response = await fetch(`${API}/api/inquiries`, {
+
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          productId: id,
+          productName: product.name,
+          ...inquiryData,
+          quantity: quantity
+        })
+      });
+
+      if (response.ok) {
+        showToast('Your inquiry has been sent successfully! The supplier will contact you soon.', 'success', 'inquiry');
+        setIsInquiryModalOpen(false);
+        setInquiryData({
+          name: '',
+          email: '',
+          company: '',
+          phone: '',
+          message: '',
+          quantity: quantity
+        });
+      } else {
+        throw new Error('Failed to send inquiry');
+      }
+    } catch (err) {
+      console.error('Error sending inquiry:', err);
+      showToast('Failed to send inquiry. Please try again.', 'error', 'inquiry');
+    }
+  };
+
+  const handleAddToCart = () => {
+    if (!isAuthenticated) {
+      navigate('/login', { state: { from: `/product/${id}` } });
+      return;
+    }
+
+    if (product && currentPrice) {
+      const cartProduct = {
+        id: product._id,
+        name: product.name,
+        supplier: product.supplier,
+        moq: product.moq,
+        image: getImageUrl(product.image),
+        price: currentPrice,
+        quantity: quantity,
+        subtotal: currentPrice * quantity
+      };
+
+      addToCart(cartProduct);
+      showToast('Product added to cart successfully!', 'success', 'cart');
+    } else {
+      showToast('Please select a valid quantity to add to cart.', 'warning', 'cart');
+    }
+  };
+
+  const handleAddToWishlist = () => {
+    if (!isAuthenticated) {
+      navigate('/login', { state: { from: `/product/${id}` } });
+      return;
+    }
+
+    if (product) {
+      addToWishlist(product);
+      if (!isInWishlist) {
+        showToast('Product added to wishlist!', 'success', 'wishlist');
+      } else {
+        showToast('Product removed from wishlist!', 'info', 'wishlist');
+      }
+    }
+  };
+
+  // Mock images for gallery
+  const productImages = [
+    getImageUrl(product?.image),
+    getImageUrl(product?.image),
+    getImageUrl(product?.image),
+    getImageUrl(product?.image)
+  ];
+
+  // Specification fields
+  const specifications = [
+    { label: 'Material', value: product?.specifications?.material },
+    { label: 'Size/Dimensions', value: product?.specifications?.size },
+    { label: 'Weight Capacity', value: product?.specifications?.weightCapacity },
+    { label: 'Lead Time', value: product?.specifications?.leadTime },
+    { label: 'Customization', value: product?.specifications?.customization },
+    { label: 'Color Options', value: product?.specifications?.colorOptions },
+    { label: 'Packaging', value: product?.specifications?.packaging },
+    { label: 'MOQ', value: `${product?.moq} units` }
+  ];
+
+  // Get icon based on toast type and action
+  const getToastIcon = () => {
+    if (toast.action === 'cart') return '🛒';
+    if (toast.action === 'wishlist') return '❤️';
+    if (toast.action === 'inquiry') return '📩';
+    
+    switch (toast.type) {
+      case 'success': return '✅';
+      case 'error': return '❌';
+      case 'warning': return '⚠️';
+      case 'info': return 'ℹ️';
+      default: return '✅';
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="product-loading">
+        <div className="loading-spinner"></div>
+        <p>Loading product details...</p>
+      </div>
+    );
+  }
+
+  if (error && !product) {
+    return (
+      <div className="product-error">
+        <div className="error-icon">⚠️</div>
+        <h2>Product Not Found</h2>
+        <p>{error}</p>
+        <Link to="/" className="btn btn-primary">Back to Home</Link>
+      </div>
+    );
+  }
+
+  if (!product) {
+    return (
+      <div className="product-error">
+        <div className="error-icon">🔍</div>
+        <h2>Product Not Found</h2>
+        <p>The product you're looking for doesn't exist.</p>
+        <Link to="/" className="btn btn-primary">Back to Home</Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="product-details">
+      {/* Toast Notification */}
+      {toast.show && (
+        <div className={`toast toast-${toast.type}`}>
+          <div className="toast-content">
+            <div className="toast-icon">{getToastIcon()}</div>
+            <div className="toast-message">{toast.message}</div>
+            <button className="toast-close" onClick={hideToast}>×</button>
+          </div>
+          <div className="toast-progress"></div>
+        </div>
+      )}
+
+      {/* Main Product Section - ONLY images and basic info in 2-column layout */}
+      <div className="container">
+        <section className="product-main">
+          <div className="product-layout">
+            
+            {/* Product Gallery - Left Side */}
+            <div className="product-gallery">
+              <div className="main-image">
+                <img 
+                  src={productImages[selectedImage]} 
+                  alt={product.name}
+                  onError={(e) => {
+                    e.target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTAwIiBoZWlnaHQ9IjQwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZjVmN2Y5Ii8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtc2l6ZT0iMTgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIiBmaWxsPSIjODg4Ij5Qcm9kdWN0IEltYWdlPC90ZXh0Pjwvc3ZnPg==';
+                  }}
+                />
+              </div>
+              <div className="image-thumbnails">
+                {productImages.map((img, index) => (
+                  <button
+                    key={index}
+                    className={`thumbnail-btn ${selectedImage === index ? 'active' : ''}`}
+                    onClick={() => setSelectedImage(index)}
+                  >
+                    <img src={img} alt={`${product.name} ${index + 1}`} />
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Product Info - Right Side - ONLY basic info */}
+            <div className="product-info">
+              <div className="product-header">
+                <h1 className="product-title">{product.name}</h1>
+                <div className="supplier-info">
+                  <span className="supplier-name">by {product.supplier}</span>
+                  <div className="badges">
+                    {product.verified && <span className="badge verified">Verified</span>}
+                    {product.featured && <span className="badge featured">Featured</span>}
+                  </div>
+                </div>
+                
+                <div className="product-meta">
+                  <div className="rating">
+                    ⭐⭐⭐⭐⭐ <span>4.5 ({product.reviewCount || 0} reviews)</span>
+                  </div>
+                  <div className="orders">
+                    📦 {product.orderCount || 0} orders
+                  </div>
+                </div>
+              </div>
+
+              {/* Price Section */}
+              <div className="price-section">
+                {currentPrice ? (
+                  <>
+                    <div className="current-price">৳{currentPrice.toFixed(2)} / unit</div>
+                    <div className="total-price">Total: ৳{totalPrice}</div>
+                    <div className="price-note">Price varies based on quantity</div>
+                  </>
+                ) : (
+                  <div className="price-note">Contact for pricing</div>
+                )}
+              </div>
+
+              {/* Tiered Pricing Table */}
+              {product.tieredPricing && product.tieredPricing.length > 0 && (
+                <div className="tiered-pricing">
+                  <h4>Quantity Pricing</h4>
+                  <div className="pricing-table">
+                    {product.tieredPricing
+                      .sort((a, b) => a.minQty - b.minQty)
+                      .map((tier, index) => (
+                        <div 
+                          key={index} 
+                          className={`pricing-tier ${quantity >= tier.minQty && (tier.maxQty === 0 || quantity <= tier.maxQty) ? 'active' : ''}`}
+                        >
+                          <div className="tier-range">
+                            {tier.minQty} - {tier.maxQty === 0 ? 'Above' : tier.maxQty} units
+                          </div>
+                          <div className="tier-price">৳{tier.price.toFixed(2)}/unit</div>
+                        </div>
+                      ))
+                    }
+                  </div>
+                </div>
+              )}
+
+              {/* Quantity Section */}
+              <div className="quantity-section">
+                <label htmlFor="quantity">Order Quantity:</label>
+                <div className="quantity-input">
+                  <input
+                    type="number"
+                    id="quantity"
+                    min={product.moq || 1}
+                    value={quantity}
+                    onChange={(e) => setQuantity(Math.max(product.moq || 1, parseInt(e.target.value) || product.moq || 1))}
+                  />
+                  <span className="moq-note">Minimum: {product.moq || 1} units</span>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="action-buttons">
+                <button 
+                  className="btn btn-primary btn-large"
+                  onClick={() => setIsInquiryModalOpen(true)}
+                >
+                  <span>📩</span>
+                  Request Quote
+                </button>
+                <button 
+                  className={`btn btn-secondary ${isInCart ? 'in-cart' : ''}`}
+                  onClick={handleAddToCart}
+                >
+                  <span>{isInCart ? '✅' : '🛒'}</span>
+                  {isInCart ? 'Added to Cart' : 'Add to Cart'}
+                </button>
+                <button 
+                  className={`btn btn-outline ${isInWishlist ? 'in-wishlist' : ''}`}
+                  onClick={handleAddToWishlist}
+                >
+                  <span>{isInWishlist ? '❤️' : '🤍'}</span>
+                  {isInWishlist ? 'Saved' : 'Save'}
+                </button>
+              </div>
+
+              {/* Quick Info */}
+              <div className="quick-info">
+                <div className="info-item">
+                  <span className="icon">🚚</span>
+                  <span>Free shipping on orders over $500</span>
+                </div>
+                <div className="info-item">
+                  <span className="icon">🛡️</span>
+                  <span>Verified supplier • Quality guaranteed</span>
+                </div>
+                <div className="info-item">
+                  <span className="icon">💬</span>
+                  <span>Response within 24 hours</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      {/* COMPLETELY SEPARATE TABS SECTION - OUTSIDE THE MAIN CONTAINER */}
+      <section className="product-tabs-section">
+        <div className="container">
+          <div className="tabs-container">
+            <div className="tabs-header">
+              <button 
+                className={`tab ${activeTab === 'description' ? 'active' : ''}`}
+                onClick={() => setActiveTab('description')}
+              >
+                Description
+              </button>
+              <button 
+                className={`tab ${activeTab === 'specifications' ? 'active' : ''}`}
+                onClick={() => setActiveTab('specifications')}
+              >
+                Specifications
+              </button>
+              <button 
+                className={`tab ${activeTab === 'supplier' ? 'active' : ''}`}
+                onClick={() => setActiveTab('supplier')}
+              >
+                Supplier Info
+              </button>
+            </div>
+
+            <div className="tabs-content">
+              {activeTab === 'description' && (
+                <div className="tab-panel">
+                  <h3>Product Description</h3>
+                  <div className="description-content">
+                    <p>{product.description || "No description available for this product. Contact the supplier for more details."}</p>
+                    
+                    <div className="features">
+                      <h4>Key Features</h4>
+                      <ul>
+                        <li>High-quality materials and craftsmanship</li>
+                        <li>Competitive pricing with bulk discounts</li>
+                        <li>Customization options available</li>
+                        <li>Fast and reliable shipping</li>
+                        <li>Professional customer support</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'specifications' && (
+                <div className="tab-panel">
+                  <h3>Detailed Specifications</h3>
+                  <div className="specifications-grid">
+                    {specifications.map((spec, index) => (
+                      spec.value && (
+                        <div key={index} className="spec-row">
+                          <div className="spec-label">{spec.label}</div>
+                          <div className="spec-value">{spec.value}</div>
+                        </div>
+                      )
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'supplier' && (
+                <div className="tab-panel">
+                  <h3>Supplier Information</h3>
+                  <div className="supplier-card">
+                    <div className="supplier-header">
+                      <h4>{product.supplier}</h4>
+                      <div className="supplier-badges">
+                        {product.verified && <span className="badge large verified">Verified Supplier</span>}
+                        {product.featured && <span className="badge large featured">Featured</span>}
+                      </div>
+                    </div>
+                    <p className="supplier-description">
+                      This supplier has been thoroughly vetted and verified by our team to ensure quality and reliability. 
+                      They have a proven track record of delivering excellent products and customer service.
+                    </p>
+                    <div className="supplier-stats">
+                      <div className="stat">
+                        <div className="stat-value">95%</div>
+                        <div className="stat-label">Response Rate</div>
+                      </div>
+                      <div className="stat">
+                        <div className="stat-value">&lt; 24h</div>
+                        <div className="stat-label">Response Time</div>
+                      </div>
+                      <div className="stat">
+                        <div className="stat-value">98%</div>
+                        <div className="stat-label">On-time Delivery</div>
+                      </div>
+                      <div className="stat">
+                        <div className="stat-value">4.8/5</div>
+                        <div className="stat-label">Customer Rating</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Inquiry Modal */}
+      {isInquiryModalOpen && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <div className="modal-header">
+              <h3>Request Quote</h3>
+              <button 
+                className="close-btn"
+                onClick={() => setIsInquiryModalOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="product-summary">
+                <img src={getImageUrl(product.image)} alt={product.name} />
+                <div>
+                  <h4>{product.name}</h4>
+                  <p>{product.supplier}</p>
+                </div>
+              </div>
+              
+              <form onSubmit={handleInquirySubmit} className="inquiry-form">
+                <div className="form-grid">
+                  <div className="form-group">
+                    <label>Full Name *</label>
+                    <input
+                      type="text"
+                      value={inquiryData.name}
+                      onChange={(e) => setInquiryData({...inquiryData, name: e.target.value})}
+                      required
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Email *</label>
+                    <input
+                      type="email"
+                      value={inquiryData.email}
+                      onChange={(e) => setInquiryData({...inquiryData, email: e.target.value})}
+                      required
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Company</label>
+                    <input
+                      type="text"
+                      value={inquiryData.company}
+                      onChange={(e) => setInquiryData({...inquiryData, company: e.target.value})}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Phone</label>
+                    <input
+                      type="tel"
+                      value={inquiryData.phone}
+                      onChange={(e) => setInquiryData({...inquiryData, phone: e.target.value})}
+                    />
+                  </div>
+                </div>
+                
+                <div className="form-group">
+                  <label>Quantity *</label>
+                  <input
+                    type="number"
+                    min={product.moq}
+                    value={inquiryData.quantity}
+                    onChange={(e) => setInquiryData({...inquiryData, quantity: parseInt(e.target.value) || product.moq})}
+                    required
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label>Message to Supplier</label>
+                  <textarea
+                    rows="4"
+                    value={inquiryData.message}
+                    onChange={(e) => setInquiryData({...inquiryData, message: e.target.value})}
+                    placeholder="Please include any specific requirements, customization needs, or questions..."
+                  />
+                </div>
+                
+                <div className="form-actions">
+                  <button type="submit" className="btn btn-primary">
+                    Send Inquiry
+                  </button>
+                  <button 
+                    type="button" 
+                    className="btn btn-outline"
+                    onClick={() => setIsInquiryModalOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default ProductDetails;
