@@ -14,7 +14,8 @@ const ForgotPassword = () => {
   const otpRefs = useRef([]);
 
   // ✅ Automatically use your deployed backend or local API
-  const API = import.meta?.env?.VITE_API_URL || 'https://sourcebd-backend.onrender.com';
+const API = import.meta.env.VITE_API_URL || 'https://sourcebd-backend.onrender.com';
+
 
   const goToStep = (stepNumber) => {
     setError('');
